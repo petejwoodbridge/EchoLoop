@@ -160,9 +160,20 @@ class EchoLoopEngine:
 
     def _get_transcript(self) -> str:
         lines = "\n".join(self._transcript)
+        header_parts: list[str] = []
+
         ctx = self.cfg.meeting_context
         if ctx:
-            return f"CONTEXT: {ctx}\n---\n{lines}"
+            header_parts.append(f"CONTEXT: {ctx}")
+
+        # Speaker balance hint
+        total = self.words_me + self.words_them
+        if total > 20:
+            pct = int(100 * self.words_me / total)
+            header_parts.append(f"TALK RATIO: user {pct}% / others {100 - pct}%")
+
+        if header_parts:
+            return "\n".join(header_parts) + "\n---\n" + lines
         return lines
 
     # ── Trigger logic ────────────────────────────────────────────────

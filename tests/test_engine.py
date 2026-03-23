@@ -66,7 +66,9 @@ class TestTranscriptManagement:
         for i in range(20):
             engine._append(_seg(f"Message number {i}"))
         transcript = engine._get_transcript()
-        assert len(transcript) <= 60  # allow small overshoot from last line
+        # Transcript may include a header (TALK RATIO), so check the raw lines
+        raw_lines = "\n".join(engine._transcript)
+        assert len(raw_lines) <= 60  # allow small overshoot from last line
         assert "Message number 0" not in transcript
 
     def test_meeting_context_prepended(self):
@@ -139,3 +141,18 @@ class TestSpeakerStats:
         assert engine.words_me == 0
         assert engine.words_them == 0
         assert engine._stats == {}
+
+    def test_talk_ratio_in_transcript(self):
+        engine, _, _ = _make_engine()
+        # Need > 20 total words to trigger the ratio header
+        engine._append(_seg("one two three four five six seven eight nine ten", Speaker.ME))
+        engine._append(_seg("one two three four five six seven eight nine ten eleven", Speaker.THEM))
+        transcript = engine._get_transcript()
+        assert "TALK RATIO:" in transcript
+        assert "user 47%" in transcript  # 10 / 21 ≈ 47%
+
+    def test_no_ratio_below_threshold(self):
+        engine, _, _ = _make_engine()
+        engine._append(_seg("hi", Speaker.ME))
+        transcript = engine._get_transcript()
+        assert "TALK RATIO:" not in transcript
