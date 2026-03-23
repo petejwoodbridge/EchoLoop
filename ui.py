@@ -39,6 +39,7 @@ class EchoLoopUI:
         pause_event: threading.Event | None = None,
         nudge_event: threading.Event | None = None,
         stats: dict | None = None,
+        transcript_ref: object | None = None,
         on_close: callable = None,
     ) -> None:
         self.cfg = cfg
@@ -46,13 +47,15 @@ class EchoLoopUI:
         self._on_close = on_close
         self._pause_event = pause_event or threading.Event()
         self._nudge_event = nudge_event or threading.Event()
-        # Shared stats dict written by the engine, read by the UI
         self._stats = stats or {}
+        # Reference to engine._transcript (a deque) for the transcript viewer
+        self._transcript_ref = transcript_ref
         if not self._pause_event.is_set():
             self._pause_event.set()
 
         self._insight_count = 0
         self._start_time = time.monotonic()
+        self._showing_transcript = False
 
         self._root = tk.Tk()
         self._build_window()
@@ -105,8 +108,15 @@ class EchoLoopUI:
         self._nudge_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         # Clear button
-        self._clear_btn = tk.Button(header, text="✕ Clear", command=self._clear_log, **btn_kw)
+        self._clear_btn = tk.Button(header, text="x Clear", command=self._clear_log, **btn_kw)
         self._clear_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # Transcript toggle button
+        if self._transcript_ref is not None:
+            self._transcript_btn = tk.Button(
+                header, text="T", command=self._toggle_transcript, **btn_kw,
+            )
+            self._transcript_btn.pack(side=tk.RIGHT, padx=(4, 0))
 
         # Status
         self._status_label = tk.Label(
@@ -178,6 +188,31 @@ class EchoLoopUI:
         self._text.configure(state=tk.NORMAL)
         self._text.delete("1.0", tk.END)
         self._text.configure(state=tk.DISABLED)
+
+    def _toggle_transcript(self) -> None:
+        """Switch between insights view and raw transcript view."""
+        self._showing_transcript = not self._showing_transcript
+        self._text.configure(state=tk.NORMAL)
+        self._text.delete("1.0", tk.END)
+
+        if self._showing_transcript and self._transcript_ref is not None:
+            self._text.tag_configure("me", foreground=self.cfg.accent_color)
+            self._text.tag_configure("them", foreground="#aaa")
+            for line in self._transcript_ref:
+                if line.startswith("[ME]"):
+                    self._text.insert(tk.END, line + "\n", "me")
+                else:
+                    self._text.insert(tk.END, line + "\n", "them")
+            self._transcript_btn.configure(text="I")  # switch back to Insights
+            self._mode_label.configure(text="TRANSCRIPT", fg="#6699cc")
+        else:
+            self._showing_transcript = False
+            if hasattr(self, "_transcript_btn"):
+                self._transcript_btn.configure(text="T")
+            self._mode_label.configure(text="", fg=self.cfg.accent_color)
+
+        self._text.configure(state=tk.DISABLED)
+        self._text.see(tk.END)
 
     # ── Drag-to-move ─────────────────────────────────────────────────
 

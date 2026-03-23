@@ -347,6 +347,16 @@ def main() -> None:
     if args.backend is not None:
         cfg.transcriber.backend = args.backend
 
+    # Validate configuration
+    issues = cfg.validate()
+    for issue in issues:
+        log.warning("Config: %s", issue)
+    # Fatal issues (missing API keys) — exit early
+    fatal = [i for i in issues if "is not set" in i]
+    if fatal:
+        print("\n  Fix the above config issues and try again.\n")
+        sys.exit(1)
+
     # Interactive device selection if not set via env
     if cfg.audio.system_device is None:
         chosen = pick_device_interactive()
@@ -435,7 +445,8 @@ def main() -> None:
     ui = EchoLoopUI(
         cfg.ui, insight_queue,
         pause_event=pause_event, nudge_event=nudge_event,
-        stats=shared_stats, on_close=shutdown,
+        stats=shared_stats, transcript_ref=engine._transcript,
+        on_close=shutdown,
     )
     ui.run()
 

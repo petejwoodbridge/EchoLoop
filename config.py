@@ -32,6 +32,8 @@ class TranscriberConfig:
     whisper_model: str = os.getenv("ECHOLOOP_WHISPER_MODEL", "base.en")
     whisper_device: str = os.getenv("ECHOLOOP_WHISPER_DEVICE", "cpu")  # "cpu" or "cuda"
     whisper_compute_type: str = os.getenv("ECHOLOOP_WHISPER_COMPUTE", "int8")
+    # Language code (e.g. "en", "fr", "de", "ja") — None = auto-detect
+    language: str | None = os.getenv("ECHOLOOP_LANGUAGE", "en") or None
     # Deepgram settings
     deepgram_api_key: str = os.getenv("DEEPGRAM_API_KEY", "")
     deepgram_model: str = "nova-2"
@@ -97,3 +99,35 @@ class AppConfig:
     ui: UIConfig = field(default_factory=UIConfig)
     # Directory for session transcript logs (empty string = disabled)
     log_dir: str = os.getenv("ECHOLOOP_LOG_DIR", "")
+
+    def validate(self) -> list[str]:
+        """Return a list of configuration warnings/errors."""
+        issues: list[str] = []
+
+        # LLM key check
+        if self.llm.provider == "anthropic" and not self.llm.anthropic_api_key:
+            issues.append("ANTHROPIC_API_KEY is not set (required for Anthropic provider)")
+        if self.llm.provider == "openai" and not self.llm.openai_api_key:
+            issues.append("OPENAI_API_KEY is not set (required for OpenAI provider)")
+
+        # Deepgram key check
+        if self.transcriber.backend == "deepgram" and not self.transcriber.deepgram_api_key:
+            issues.append("DEEPGRAM_API_KEY is not set (required for Deepgram backend)")
+
+        # Range checks
+        if not 0.0 <= self.ui.opacity <= 1.0:
+            issues.append(f"ECHOLOOP_OPACITY={self.ui.opacity} is out of range [0.0, 1.0]")
+        if self.llm.push_interval < 5:
+            issues.append(f"ECHOLOOP_PUSH_INTERVAL={self.llm.push_interval} is too low (min 5s)")
+        if self.audio.energy_threshold < 0:
+            issues.append(f"ECHOLOOP_ENERGY_THRESHOLD={self.audio.energy_threshold} must be >= 0")
+        if not 0.0 <= self.llm.temperature <= 2.0:
+            issues.append(f"ECHOLOOP_LLM_TEMPERATURE={self.llm.temperature} is out of range [0.0, 2.0]")
+
+        # Provider/backend validity
+        if self.llm.provider not in ("anthropic", "openai"):
+            issues.append(f"ECHOLOOP_LLM_PROVIDER='{self.llm.provider}' must be 'anthropic' or 'openai'")
+        if self.transcriber.backend not in ("local", "deepgram"):
+            issues.append(f"ECHOLOOP_TRANSCRIBER='{self.transcriber.backend}' must be 'local' or 'deepgram'")
+
+        return issues

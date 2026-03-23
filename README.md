@@ -191,6 +191,7 @@ python main.py --provider openai --backend deepgram
 | **✕ Clear** button | Clear the insight log |
 | `Ctrl+Shift+E` | Global hotkey to toggle pause (requires `pynput`) |
 | **Drag anywhere** | Move the overlay window |
+| **T** button | Toggle between insights view and raw transcript view |
 | **Footer bar** | Shows insight count, session time, and your talk-time % |
 
 ## ⚙️ Configuration
@@ -205,6 +206,7 @@ All settings are controlled via environment variables. See [`.env.example`](.env
 | `ECHOLOOP_WHISPER_MODEL` | `base.en` | Whisper model size (`tiny.en`, `base.en`, `small.en`, `medium.en`, `large-v3`) |
 | `ECHOLOOP_WHISPER_DEVICE` | `cpu` | `cpu` or `cuda` |
 | `ECHOLOOP_WHISPER_COMPUTE` | `int8` | `int8`, `float16`, or `float32` |
+| `ECHOLOOP_LANGUAGE` | `en` | Language code (`en`, `fr`, `de`, `ja`, etc.) or empty for auto-detect |
 | `ECHOLOOP_LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `ECHOLOOP_ANTHROPIC_MODEL` | `claude-sonnet-4-20250514` | Anthropic model ID |
 | `ECHOLOOP_OPENAI_MODEL` | `gpt-4o` | OpenAI model ID |

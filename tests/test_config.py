@@ -58,3 +58,46 @@ def test_env_overrides():
 
     # Reload again to restore defaults for other tests
     importlib.reload(config)
+
+
+def test_validate_missing_anthropic_key():
+    from config import AppConfig
+    cfg = AppConfig()
+    cfg.llm.provider = "anthropic"
+    cfg.llm.anthropic_api_key = ""
+    issues = cfg.validate()
+    assert any("ANTHROPIC_API_KEY" in i for i in issues)
+
+
+def test_validate_missing_openai_key():
+    from config import AppConfig
+    cfg = AppConfig()
+    cfg.llm.provider = "openai"
+    cfg.llm.openai_api_key = ""
+    issues = cfg.validate()
+    assert any("OPENAI_API_KEY" in i for i in issues)
+
+
+def test_validate_bad_opacity():
+    from config import AppConfig
+    cfg = AppConfig()
+    cfg.llm.anthropic_api_key = "test"  # prevent key error
+    cfg.ui.opacity = 1.5
+    issues = cfg.validate()
+    assert any("ECHOLOOP_OPACITY" in i for i in issues)
+
+
+def test_validate_clean_config():
+    from config import AppConfig
+    cfg = AppConfig()
+    cfg.llm.anthropic_api_key = "sk-test"
+    issues = cfg.validate()
+    assert len(issues) == 0
+
+
+def test_validate_bad_provider():
+    from config import AppConfig
+    cfg = AppConfig()
+    cfg.llm.provider = "gemini"
+    issues = cfg.validate()
+    assert any("ECHOLOOP_LLM_PROVIDER" in i for i in issues)

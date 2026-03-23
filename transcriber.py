@@ -62,22 +62,24 @@ class _WhisperBackend(_Backend):
         from faster_whisper import WhisperModel  # lazy import – heavy
 
         log.info(
-            "Loading faster-whisper model=%s device=%s compute=%s",
+            "Loading faster-whisper model=%s device=%s compute=%s lang=%s",
             cfg.whisper_model,
             cfg.whisper_device,
             cfg.whisper_compute_type,
+            cfg.language or "auto",
         )
         self._model = WhisperModel(
             cfg.whisper_model,
             device=cfg.whisper_device,
             compute_type=cfg.whisper_compute_type,
         )
+        self._language = cfg.language
 
     def transcribe(self, audio: np.ndarray) -> str:
         segments, _ = self._model.transcribe(
             audio,
             beam_size=1,
-            language="en",
+            language=self._language,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
         )
