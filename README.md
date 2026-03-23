@@ -16,7 +16,9 @@
 
 ---
 
-EchoLoop sits quietly on top of your Zoom, Teams, or Google Meet window. It captures what everyone's saying, transcribes it in real time, and feeds the live transcript to an LLM that acts as your personal executive coach — delivering sharp, tactical advice every 30 seconds.
+EchoLoop sits quietly on top of your Zoom, Teams, or Google Meet window. It captures what everyone's saying, transcribes it in real time, and feeds the live transcript to an LLM that acts as your personal executive coach — delivering sharp, tactical advice every few seconds.
+
+Maybe you're prepping for a high-stakes negotiation. Maybe you're in back-to-back meetings and your brain checked out two calls ago. Or maybe you just don't feel like talking today and need a quiet co-pilot feeding you the right words at the right time. No judgement. We've all been there.
 
 **Work smarter, not harder.**
 
