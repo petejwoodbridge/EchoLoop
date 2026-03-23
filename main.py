@@ -297,7 +297,10 @@ def _load_dotenv() -> None:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="echoloop",
-        description="EchoLoop — real-time AI meeting copilot",
+        description="EchoLoop -- real-time AI meeting copilot",
+    )
+    parser.add_argument(
+        "--version", action="version", version="echoloop 0.1.0",
     )
     parser.add_argument(
         "--list-devices", action="store_true",
@@ -315,6 +318,10 @@ def _parse_args() -> argparse.Namespace:
         "--backend", type=str, choices=["local", "deepgram"], default=None,
         help="Transcription backend (overrides ECHOLOOP_TRANSCRIBER)",
     )
+    parser.add_argument(
+        "--debug", action="store_true",
+        help="Enable debug logging (verbose audio/transcription output)",
+    )
     return parser.parse_args()
 
 
@@ -323,6 +330,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     _load_dotenv()
     args = _parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     print(BANNER)
     _check_dependencies()
