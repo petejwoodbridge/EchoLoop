@@ -49,10 +49,14 @@ class LLMConfig:
     push_interval: float = float(os.getenv("ECHOLOOP_PUSH_INTERVAL", "35"))
     # Silence duration (seconds) that triggers an early push
     silence_trigger: float = float(os.getenv("ECHOLOOP_SILENCE_TRIGGER", "4.0"))
+    # LLM temperature (lower = more deterministic)
+    temperature: float = float(os.getenv("ECHOLOOP_LLM_TEMPERATURE", "0.4"))
     # Max transcript tokens to keep in the rolling window
     max_transcript_chars: int = 6000
     # Optional one-line meeting briefing for targeted advice
     meeting_context: str = os.getenv("ECHOLOOP_MEETING_CONTEXT", "")
+    # Override system prompt via env var (empty = use default)
+    system_prompt_override: str = os.getenv("ECHOLOOP_SYSTEM_PROMPT", "")
     system_prompt: str = (
         "You are a ruthless, highly perceptive executive coach embedded in a live meeting. "
         "You receive a rolling transcript of the conversation. Your job is to give the user "

@@ -57,13 +57,18 @@ class _LLMClient:
                 raise ValueError("OPENAI_API_KEY is required")
             return openai.AsyncOpenAI(api_key=cfg.openai_api_key)
 
+    @property
+    def _system_prompt(self) -> str:
+        return self.cfg.system_prompt_override or self.cfg.system_prompt
+
     async def get_advice(self, transcript: str) -> str:
         """Send the rolling transcript and get back punchy bullet points."""
         if self.cfg.provider == "anthropic":
             resp = await self._client.messages.create(
                 model=self.cfg.anthropic_model,
                 max_tokens=200,
-                system=self.cfg.system_prompt,
+                temperature=self.cfg.temperature,
+                system=self._system_prompt,
                 messages=[{"role": "user", "content": transcript}],
             )
             return resp.content[0].text
@@ -71,8 +76,9 @@ class _LLMClient:
             resp = await self._client.chat.completions.create(
                 model=self.cfg.openai_model,
                 max_tokens=200,
+                temperature=self.cfg.temperature,
                 messages=[
-                    {"role": "system", "content": self.cfg.system_prompt},
+                    {"role": "system", "content": self._system_prompt},
                     {"role": "user", "content": transcript},
                 ],
             )
@@ -101,6 +107,7 @@ class EchoLoopEngine:
         insight_queue: queue.Queue[Insight],
         *,
         pause_event: threading.Event | None = None,
+        nudge_event: threading.Event | None = None,
     ) -> None:
         self.cfg = cfg
         self._seg_q = segment_queue
@@ -110,6 +117,8 @@ class EchoLoopEngine:
         self._pause_event = pause_event or threading.Event()
         if not self._pause_event.is_set():
             self._pause_event.set()
+        # Set by the UI "Nudge" button to force an immediate LLM call
+        self._nudge_event = nudge_event or threading.Event()
 
         self._transcript: deque[str] = deque()
         self._transcript_chars: int = 0
@@ -187,7 +196,11 @@ class EchoLoopEngine:
                 except asyncio.QueueEmpty:
                     break
 
-            if self._should_push():
+            # Check for manual nudge
+            if self._nudge_event.is_set():
+                self._nudge_event.clear()
+                await self._fire()
+            elif self._should_push():
                 await self._fire()
 
     async def _fire(self) -> None:

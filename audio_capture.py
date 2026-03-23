@@ -124,20 +124,43 @@ class AudioCapture:
                     buffer[:leftover] = mono[take:]
                     buf_pos = leftover
 
-        try:
-            with sd.InputStream(
-                device=device,
-                samplerate=self.cfg.sample_rate,
-                channels=self.cfg.channels,
-                dtype=self.cfg.dtype,
-                blocksize=1024,
-                callback=_callback,
-            ):
-                log.info("Started %s stream (device=%s)", speaker.name, device)
-                while not self._stop_event.is_set():
-                    self._stop_event.wait(timeout=0.25)
-        except Exception:
-            log.exception("Fatal error in %s audio stream", speaker.name)
+        max_retries = 5
+        retry_delay = 2.0
+
+        for attempt in range(max_retries):
+            try:
+                with sd.InputStream(
+                    device=device,
+                    samplerate=self.cfg.sample_rate,
+                    channels=self.cfg.channels,
+                    dtype=self.cfg.dtype,
+                    blocksize=1024,
+                    callback=_callback,
+                ):
+                    if attempt > 0:
+                        log.info("Reconnected %s stream (attempt %d)", speaker.name, attempt + 1)
+                    else:
+                        log.info("Started %s stream (device=%s)", speaker.name, device)
+                    while not self._stop_event.is_set():
+                        self._stop_event.wait(timeout=0.25)
+                    return  # clean exit
+            except sd.PortAudioError as e:
+                if self._stop_event.is_set():
+                    return
+                log.warning(
+                    "%s stream lost (attempt %d/%d): %s — retrying in %.0fs",
+                    speaker.name, attempt + 1, max_retries, e, retry_delay,
+                )
+                self._stop_event.wait(timeout=retry_delay)
+                retry_delay = min(retry_delay * 1.5, 15.0)
+                # Reset buffer state
+                buffer[:] = 0.0
+                buf_pos = 0
+            except Exception:
+                log.exception("Fatal error in %s audio stream", speaker.name)
+                return
+
+        log.error("%s stream failed after %d retries — giving up", speaker.name, max_retries)
 
     # ── Public API ───────────────────────────────────────────────────
 

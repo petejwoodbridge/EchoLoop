@@ -8,6 +8,7 @@ and manages the async event loop alongside the Tkinter main loop.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import os
 import queue
@@ -15,12 +16,6 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-
-from audio_capture import AudioCapture
-from config import AppConfig
-from engine import EchoLoopEngine, Insight
-from transcriber import Segment, Transcriber
-from ui import EchoLoopUI
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -31,43 +26,152 @@ logging.basicConfig(
 )
 log = logging.getLogger("echoloop")
 
+# ── CLI banner ───────────────────────────────────────────────────────
+
+BANNER = r"""
+    ╔═══════════════════════════════════════════════╗
+    ║                                               ║
+    ║    ◉  E c h o L o o p                         ║
+    ║       ─────────────                           ║
+    ║       Real-time AI meeting copilot            ║
+    ║       Meeting superpowers. Every call.        ║
+    ║                                               ║
+    ╚═══════════════════════════════════════════════╝
+"""
+
+# ── Dependency checks ────────────────────────────────────────────────
+
+_REQUIRED = {
+    "sounddevice": "Audio capture        → pip install sounddevice",
+    "numpy":       "Audio processing     → pip install numpy",
+}
+
+_OPTIONAL = {
+    "faster_whisper": ("Local transcription  → pip install faster-whisper", "local transcription"),
+    "anthropic":      ("Anthropic LLM        → pip install anthropic",     "Anthropic provider"),
+    "openai":         ("OpenAI LLM           → pip install openai",        "OpenAI provider"),
+    "httpx":          ("Deepgram backend     → pip install httpx",         "Deepgram transcription"),
+    "pynput":         ("Global hotkeys       → pip install pynput",        "global hotkey support"),
+}
+
+
+def _check_dependencies() -> None:
+    """Validate required deps are installed; warn about optional ones."""
+    missing = []
+    for mod, hint in _REQUIRED.items():
+        try:
+            importlib.import_module(mod)
+        except ImportError:
+            missing.append(hint)
+
+    if missing:
+        print("\n  Missing required dependencies:\n")
+        for m in missing:
+            print(f"    ✗  {m}")
+        print("\n  Run:  pip install -r requirements.txt\n")
+        sys.exit(1)
+
+    for mod, (hint, label) in _OPTIONAL.items():
+        try:
+            importlib.import_module(mod)
+        except ImportError:
+            log.debug("Optional: %s not installed (%s unavailable)", mod, label)
+
+
+# ── Lazy imports (after dep check) ───────────────────────────────────
+
+def _import_app_modules():
+    global AudioCapture, AppConfig, EchoLoopEngine, Insight, Segment, Transcriber, EchoLoopUI
+    from audio_capture import AudioCapture
+    from config import AppConfig
+    from engine import EchoLoopEngine, Insight
+    from transcriber import Segment, Transcriber
+    from ui import EchoLoopUI
+
 
 # ── Session file logger ──────────────────────────────────────────────
 
 class SessionLogger:
     """
     Appends timestamped transcript lines and insights to a log file.
+    Optionally exports a Markdown summary on close.
     Disabled when log_dir is empty.
     """
 
     def __init__(self, log_dir: str) -> None:
         self._file = None
+        self._path = None
+        self._segments: list[str] = []
+        self._insights: list[str] = []
         if not log_dir:
             return
-        path = Path(log_dir)
+        path = Path(log_dir).expanduser()
         path.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         self._path = path / f"echoloop_{stamp}.log"
+        self._md_path = path / f"echoloop_{stamp}.md"
         self._file = open(self._path, "a", encoding="utf-8", buffering=1)
+        self._start_time = datetime.now()
         log.info("Session log: %s", self._path)
 
-    def log_segment(self, seg: Segment) -> None:
+    def log_segment(self, text: str, speaker: str) -> None:
         if not self._file:
             return
-        tag = "[ME]" if seg.speaker.name == "ME" else "[THEM]"
         ts = datetime.now().strftime("%H:%M:%S")
-        self._file.write(f"{ts}  {tag} {seg.text}\n")
+        line = f"{ts}  [{speaker}] {text}"
+        self._file.write(line + "\n")
+        self._segments.append(line)
 
-    def log_insight(self, insight: Insight) -> None:
+    def log_insight(self, insight) -> None:
         if not self._file:
             return
         ts = datetime.now().strftime("%H:%M:%S")
-        self._file.write(f"{ts}  [INSIGHT] {insight.text}\n")
+        line = f"{ts}  [INSIGHT] {insight.text}"
+        self._file.write(line + "\n")
+        self._insights.append(insight.text)
 
     def close(self) -> None:
         if self._file:
             self._file.close()
             self._file = None
+            self._export_markdown()
+
+    def _export_markdown(self) -> None:
+        """Write a Markdown summary of the session."""
+        if not self._path or (not self._segments and not self._insights):
+            return
+        try:
+            duration = datetime.now() - self._start_time
+            mins = int(duration.total_seconds() // 60)
+            secs = int(duration.total_seconds() % 60)
+
+            with open(self._md_path, "w", encoding="utf-8") as f:
+                f.write(f"# EchoLoop Session — {self._start_time.strftime('%Y-%m-%d %H:%M')}\n\n")
+                f.write(f"**Duration:** {mins}m {secs}s  \n")
+                f.write(f"**Segments:** {len(self._segments)}  \n")
+                f.write(f"**Insights:** {len(self._insights)}\n\n")
+
+                if self._insights:
+                    f.write("## Key Insights\n\n")
+                    for ins in self._insights:
+                        for line in ins.strip().split("\n"):
+                            line = line.strip()
+                            if line:
+                                if line.startswith(("•", "-", "*", "→")):
+                                    line = line[1:].strip()
+                                f.write(f"- {line}\n")
+                    f.write("\n")
+
+                if self._segments:
+                    f.write("## Full Transcript\n\n")
+                    f.write("```\n")
+                    for seg in self._segments:
+                        f.write(seg + "\n")
+                    f.write("```\n")
+
+            log.info("Markdown export: %s", self._md_path)
+        except Exception:
+            log.exception("Failed to export markdown summary")
 
 
 # ── Device picker (interactive) ──────────────────────────────────────
@@ -107,21 +211,16 @@ def pick_device_interactive() -> str | None:
 # ── Async engine runner ──────────────────────────────────────────────
 
 def _run_async_loop(
-    transcriber: Transcriber,
-    engine: EchoLoopEngine,
+    transcriber,
+    engine,
     stop_event: threading.Event,
-    session_logger: SessionLogger,
 ) -> None:
     """Runs in a daemon thread – hosts the asyncio event loop."""
 
     async def _main() -> None:
-        # Wrap the transcriber to also log segments
-        original_seg_q = engine._seg_q
-
         t_task = asyncio.create_task(transcriber.run())
         e_task = asyncio.create_task(engine.run())
 
-        # Wait until the stop event is set (from the main/UI thread)
         while not stop_event.is_set():
             await asyncio.sleep(0.25)
 
@@ -137,9 +236,45 @@ def _run_async_loop(
     asyncio.run(_main())
 
 
+# ── Global hotkey (optional) ─────────────────────────────────────────
+
+def _start_hotkey_listener(pause_event: threading.Event) -> None:
+    """Register Ctrl+Shift+E to toggle pause. Silently skipped if pynput missing."""
+    try:
+        from pynput import keyboard
+    except ImportError:
+        return
+
+    COMBO = {keyboard.Key.ctrl_l, keyboard.Key.shift_l}
+    TRIGGER = keyboard.KeyCode.from_char("e")
+    current = set()
+
+    def on_press(key):
+        if key in COMBO:
+            current.add(key)
+        if key == TRIGGER and COMBO.issubset(current):
+            if pause_event.is_set():
+                pause_event.clear()
+                log.info("Paused (hotkey)")
+            else:
+                pause_event.set()
+                log.info("Resumed (hotkey)")
+
+    def on_release(key):
+        current.discard(key)
+
+    listener = keyboard.Listener(on_press=on_press, on_release=on_release, daemon=True)
+    listener.start()
+    log.info("Global hotkey registered: Ctrl+Shift+E (pause/resume)")
+
+
 # ── Entry point ──────────────────────────────────────────────────────
 
 def main() -> None:
+    print(BANNER)
+    _check_dependencies()
+    _import_app_modules()
+
     cfg = AppConfig()
 
     # Interactive device selection if not set via env
@@ -151,31 +286,34 @@ def main() -> None:
     # Session logger
     session_logger = SessionLogger(cfg.log_dir)
 
-    # Shared pause event (set = running, clear = paused)
+    # Shared events
     pause_event = threading.Event()
-    pause_event.set()
+    pause_event.set()  # set = running, clear = paused
+    nudge_event = threading.Event()  # set = fire now
+
+    # Optional global hotkey
+    _start_hotkey_listener(pause_event)
 
     # Components — use AudioCapture's own chunk_queue
     audio = AudioCapture(cfg.audio)
     chunk_queue = audio.chunk_queue
 
-    # Wrap the segment queue to intercept segments for logging
-    segment_queue: asyncio.Queue[Segment] = asyncio.Queue(maxsize=500)
-    insight_queue: queue.Queue[Insight] = queue.Queue(maxsize=100)
+    segment_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+    insight_queue: queue.Queue = queue.Queue(maxsize=100)
 
-    # Tap into insight queue for logging
+    # Logging proxy for insight queue
     class _LoggingInsightQueue:
         """Proxy that logs insights as they flow through."""
 
-        def __init__(self, real_q: queue.Queue[Insight], logger: SessionLogger):
+        def __init__(self, real_q, logger: SessionLogger):
             self._q = real_q
             self._logger = logger
 
-        def put_nowait(self, item: Insight) -> None:
+        def put_nowait(self, item) -> None:
             self._logger.log_insight(item)
             self._q.put_nowait(item)
 
-        def get_nowait(self) -> Insight:
+        def get_nowait(self):
             return self._q.get_nowait()
 
         def __getattr__(self, name):
@@ -185,7 +323,8 @@ def main() -> None:
 
     transcriber = Transcriber(cfg.transcriber, chunk_queue, segment_queue)
     engine = EchoLoopEngine(
-        cfg.llm, segment_queue, logging_insight_q, pause_event=pause_event
+        cfg.llm, segment_queue, logging_insight_q,
+        pause_event=pause_event, nudge_event=nudge_event,
     )
 
     stop_event = threading.Event()
@@ -202,7 +341,7 @@ def main() -> None:
     # Start async loop (transcriber + engine) in a background thread
     async_thread = threading.Thread(
         target=_run_async_loop,
-        args=(transcriber, engine, stop_event, session_logger),
+        args=(transcriber, engine, stop_event),
         daemon=True,
         name="async-loop",
     )
@@ -210,7 +349,12 @@ def main() -> None:
 
     # Run UI on the main thread (blocks until window is closed)
     log.info("EchoLoop is live. Close the overlay window to exit.")
-    ui = EchoLoopUI(cfg.ui, insight_queue, pause_event=pause_event, on_close=shutdown)
+    print("  Press Ctrl+Shift+E to pause/resume (if pynput installed).")
+    print("  Close the overlay window to stop.\n")
+    ui = EchoLoopUI(
+        cfg.ui, insight_queue,
+        pause_event=pause_event, nudge_event=nudge_event, on_close=shutdown,
+    )
     ui.run()
 
     # Cleanup

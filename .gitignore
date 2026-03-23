@@ -24,8 +24,9 @@ desktop.ini
 
 # Environment / secrets
 .env
-*.env
-.env.*
+.env.local
+.env.production
+!.env.example
 
 # EchoLoop session logs
 logs/

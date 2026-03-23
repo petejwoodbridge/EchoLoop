@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import tkinter as tk
 from tkinter import font as tkfont
 
@@ -25,7 +26,8 @@ class EchoLoopUI:
 
     Usage
     ─────
-    ui = EchoLoopUI(cfg, insight_queue, pause_event=evt, on_close=shutdown_callback)
+    ui = EchoLoopUI(cfg, insight_queue, pause_event=evt, nudge_event=nudge,
+                     on_close=shutdown_callback)
     ui.run()   # blocks – must be called from the main thread
     """
 
@@ -35,15 +37,19 @@ class EchoLoopUI:
         insight_queue: queue.Queue[Insight],
         *,
         pause_event: threading.Event | None = None,
+        nudge_event: threading.Event | None = None,
         on_close: callable = None,
     ) -> None:
         self.cfg = cfg
         self._insight_q = insight_queue
         self._on_close = on_close
-        # When set → running, when clear → paused
         self._pause_event = pause_event or threading.Event()
+        self._nudge_event = nudge_event or threading.Event()
         if not self._pause_event.is_set():
             self._pause_event.set()
+
+        self._insight_count = 0
+        self._start_time = time.monotonic()
 
         self._root = tk.Tk()
         self._build_window()
@@ -55,12 +61,12 @@ class EchoLoopUI:
         r = self._root
         r.title("EchoLoop")
         r.geometry(f"{self.cfg.width}x{self.cfg.height}")
+        r.minsize(320, 200)
         r.attributes("-topmost", True)
         r.attributes("-alpha", self.cfg.opacity)
         r.configure(bg=self.cfg.bg_color)
         r.protocol("WM_DELETE_WINDOW", self._handle_close)
 
-        # Allow dragging the window by clicking anywhere on the background
         r.bind("<Button-1>", self._start_drag)
         r.bind("<B1-Motion>", self._do_drag)
 
@@ -76,39 +82,36 @@ class EchoLoopUI:
 
         title_font = tkfont.Font(family=c.font_family, size=c.font_size + 2, weight="bold")
         tk.Label(
-            header,
-            text="◉ EchoLoop",
-            font=title_font,
-            fg=c.accent_color,
-            bg=c.bg_color,
+            header, text="◉ EchoLoop", font=title_font,
+            fg=c.accent_color, bg=c.bg_color,
         ).pack(side=tk.LEFT)
 
-        # ── Pause / Resume button ────────────────────────────────────
         btn_font = tkfont.Font(family=c.font_family, size=c.font_size - 1)
-        self._pause_btn = tk.Button(
-            header,
-            text="⏸ Pause",
-            font=btn_font,
-            fg=c.text_color,
-            bg="#2a2a4a",
-            activebackground="#3a3a5a",
-            activeforeground=c.text_color,
-            bd=0,
-            padx=8,
-            pady=2,
-            cursor="hand2",
-            command=self._toggle_pause,
+        btn_kw = dict(
+            font=btn_font, fg=c.text_color, bg="#2a2a4a",
+            activebackground="#3a3a5a", activeforeground=c.text_color,
+            bd=0, padx=8, pady=2, cursor="hand2",
         )
-        self._pause_btn.pack(side=tk.RIGHT, padx=(8, 0))
 
+        # Pause button
+        self._pause_btn = tk.Button(header, text="⏸ Pause", command=self._toggle_pause, **btn_kw)
+        self._pause_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # Nudge button — force an immediate LLM call
+        self._nudge_btn = tk.Button(header, text="⚡ Nudge", command=self._nudge, **btn_kw)
+        self._nudge_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # Clear button
+        self._clear_btn = tk.Button(header, text="✕ Clear", command=self._clear_log, **btn_kw)
+        self._clear_btn.pack(side=tk.RIGHT, padx=(4, 0))
+
+        # Status
         self._status_label = tk.Label(
-            header,
-            text="listening…",
+            header, text="listening…",
             font=tkfont.Font(family=c.font_family, size=c.font_size - 1),
-            fg="#888",
-            bg=c.bg_color,
+            fg="#888", bg=c.bg_color,
         )
-        self._status_label.pack(side=tk.RIGHT)
+        self._status_label.pack(side=tk.RIGHT, padx=(0, 8))
 
         # ── Separator ────────────────────────────────────────────────
         tk.Frame(self._root, bg=c.accent_color, height=1).pack(fill=tk.X, padx=12, pady=4)
@@ -116,44 +119,62 @@ class EchoLoopUI:
         # ── Scrollable insight log ───────────────────────────────────
         text_font = tkfont.Font(family=c.font_family, size=c.font_size)
         self._text = tk.Text(
-            self._root,
-            wrap=tk.WORD,
-            font=text_font,
-            fg=c.text_color,
-            bg=c.bg_color,
-            bd=0,
-            highlightthickness=0,
-            padx=14,
-            pady=6,
-            cursor="arrow",
-            state=tk.DISABLED,
-            spacing3=6,
+            self._root, wrap=tk.WORD, font=text_font,
+            fg=c.text_color, bg=c.bg_color, bd=0, highlightthickness=0,
+            padx=14, pady=6, cursor="arrow", state=tk.DISABLED, spacing3=6,
         )
         self._text.pack(fill=tk.BOTH, expand=True)
 
-        # Tag for bullet styling
         self._text.tag_configure("bullet", foreground=c.accent_color)
         self._text.tag_configure("body", foreground=c.text_color)
         self._text.tag_configure(
-            "timestamp",
-            foreground="#555",
+            "dim", foreground="#555",
             font=tkfont.Font(family=c.font_family, size=c.font_size - 2),
         )
+
+        # ── Footer — stats bar ───────────────────────────────────────
+        footer = tk.Frame(self._root, bg="#111122")
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+
+        footer_font = tkfont.Font(family=c.font_family, size=c.font_size - 2)
+        self._stats_label = tk.Label(
+            footer, text="0 insights · 0m", font=footer_font,
+            fg="#555", bg="#111122", padx=12, pady=4,
+        )
+        self._stats_label.pack(side=tk.LEFT)
+
+        self._mode_label = tk.Label(
+            footer, text="", font=footer_font,
+            fg=c.accent_color, bg="#111122", padx=12, pady=4,
+        )
+        self._mode_label.pack(side=tk.RIGHT)
 
         # Welcome message
         self._append_insight("Waiting for meeting audio…")
 
-    # ── Pause / Resume ───────────────────────────────────────────────
+    # ── Actions ──────────────────────────────────────────────────────
 
     def _toggle_pause(self) -> None:
         if self._pause_event.is_set():
             self._pause_event.clear()
             self._pause_btn.configure(text="▶ Resume")
             self._status_label.configure(text="paused")
+            self._mode_label.configure(text="PAUSED", fg="#ff6b6b")
         else:
             self._pause_event.set()
             self._pause_btn.configure(text="⏸ Pause")
             self._status_label.configure(text="listening…")
+            self._mode_label.configure(text="", fg=self.cfg.accent_color)
+
+    def _nudge(self) -> None:
+        """Signal the engine to fire an LLM call immediately."""
+        self._nudge_event.set()
+        self._status_label.configure(text="nudging…")
+
+    def _clear_log(self) -> None:
+        self._text.configure(state=tk.NORMAL)
+        self._text.delete("1.0", tk.END)
+        self._text.configure(state=tk.DISABLED)
 
     # ── Drag-to-move ─────────────────────────────────────────────────
 
@@ -176,7 +197,6 @@ class EchoLoopUI:
             line = line.strip()
             if not line:
                 continue
-            # Normalise – ensure each line starts with a bullet
             if line.startswith(("•", "-", "*", "→")):
                 line = line[1:].strip()
             self._text.insert(tk.END, "  → ", "bullet")
@@ -184,13 +204,20 @@ class EchoLoopUI:
 
         self._text.insert(tk.END, "\n")
 
-        # Trim old entries to keep the widget responsive
+        # Trim old entries
         line_count = int(self._text.index("end-1c").split(".")[0])
         if line_count > self.cfg.max_lines:
             self._text.delete("1.0", f"{line_count - self.cfg.max_lines}.0")
 
         self._text.configure(state=tk.DISABLED)
         self._text.see(tk.END)
+
+    def _update_stats(self) -> None:
+        elapsed = time.monotonic() - self._start_time
+        mins = int(elapsed // 60)
+        self._stats_label.configure(
+            text=f"{self._insight_count} insight{'s' if self._insight_count != 1 else ''} · {mins}m"
+        )
 
     # ── Queue polling ────────────────────────────────────────────────
 
@@ -206,11 +233,13 @@ class EchoLoopUI:
         if batch:
             for text in batch:
                 self._append_insight(text)
+                self._insight_count += 1
             if self._pause_event.is_set():
                 self._status_label.configure(text="coaching ▸")
         elif self._pause_event.is_set():
             self._status_label.configure(text="listening…")
 
+        self._update_stats()
         self._root.after(250, self._poll_queue)
 
     # ── Lifecycle ────────────────────────────────────────────────────
