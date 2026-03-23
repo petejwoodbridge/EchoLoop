@@ -7,11 +7,13 @@ and manages the async event loop alongside the Tkinter main loop.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import importlib
 import logging
 import os
 import queue
+import signal
 import sys
 import threading
 from datetime import datetime
@@ -28,15 +30,15 @@ log = logging.getLogger("echoloop")
 
 # ── CLI banner ───────────────────────────────────────────────────────
 
-BANNER = r"""
-    ╔═══════════════════════════════════════════════╗
-    ║                                               ║
-    ║    ◉  E c h o L o o p                         ║
-    ║       ─────────────                           ║
-    ║       Real-time AI meeting copilot            ║
-    ║       Meeting superpowers. Every call.        ║
-    ║                                               ║
-    ╚═══════════════════════════════════════════════╝
+BANNER = """
+    +===============================================+
+    |                                               |
+    |    EchoLoop                                   |
+    |    ---------                                  |
+    |    Real-time AI meeting copilot               |
+    |    Meeting superpowers. Every call.            |
+    |                                               |
+    +===============================================+
 """
 
 # ── Dependency checks ────────────────────────────────────────────────
@@ -183,10 +185,11 @@ def pick_device_interactive() -> str | None:
         log.error("No input audio devices found!")
         sys.exit(1)
 
-    print("\n┌─ Available input devices ───────────────────────────┐")
+    print("\n  Available input devices:")
+    print("  " + "-" * 52)
     for d in devices:
-        print(f"│  [{d['index']:>2}]  {d['name']:<44} ch={d['channels']}")
-    print("└────────────────────────────────────────────────────┘")
+        print(f"    [{d['index']:>2}]  {d['name']:<44} ch={d['channels']}")
+    print("  " + "-" * 52)
     print()
     print("  Enter the INDEX of your virtual cable / loopback device")
     print("  (this captures what others say in the meeting).")
@@ -204,7 +207,7 @@ def pick_device_interactive() -> str | None:
     except ValueError:
         pass
 
-    print("  → Invalid choice, using default device.")
+    print("  > Invalid choice, using default device.")
     return None
 
 
@@ -268,14 +271,81 @@ def _start_hotkey_listener(pause_event: threading.Event) -> None:
     log.info("Global hotkey registered: Ctrl+Shift+E (pause/resume)")
 
 
+# ── .env loading ─────────────────────────────────────────────────────
+
+def _load_dotenv() -> None:
+    """Load .env file if it exists. No dependency on python-dotenv."""
+    env_path = Path(".env")
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key and key not in os.environ:  # don't override existing env
+            os.environ[key] = value
+    log.debug("Loaded .env file")
+
+
+# ── CLI argument parsing ─────────────────────────────────────────────
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="echoloop",
+        description="EchoLoop — real-time AI meeting copilot",
+    )
+    parser.add_argument(
+        "--list-devices", action="store_true",
+        help="List available audio input devices and exit",
+    )
+    parser.add_argument(
+        "--context", type=str, default=None,
+        help="Meeting context (overrides ECHOLOOP_MEETING_CONTEXT)",
+    )
+    parser.add_argument(
+        "--provider", type=str, choices=["anthropic", "openai"], default=None,
+        help="LLM provider (overrides ECHOLOOP_LLM_PROVIDER)",
+    )
+    parser.add_argument(
+        "--backend", type=str, choices=["local", "deepgram"], default=None,
+        help="Transcription backend (overrides ECHOLOOP_TRANSCRIBER)",
+    )
+    return parser.parse_args()
+
+
 # ── Entry point ──────────────────────────────────────────────────────
 
 def main() -> None:
+    _load_dotenv()
+    args = _parse_args()
+
     print(BANNER)
     _check_dependencies()
     _import_app_modules()
 
+    # --list-devices: print and exit
+    if args.list_devices:
+        devices = AudioCapture.list_input_devices()
+        print("Available input devices:\n")
+        for d in devices:
+            print(f"  [{d['index']:>2}]  {d['name']}  (channels={d['channels']})")
+        print()
+        sys.exit(0)
+
     cfg = AppConfig()
+
+    # CLI overrides
+    if args.context is not None:
+        cfg.llm.meeting_context = args.context
+    if args.provider is not None:
+        cfg.llm.provider = args.provider
+    if args.backend is not None:
+        cfg.transcriber.backend = args.backend
 
     # Interactive device selection if not set via env
     if cfg.audio.system_device is None:
@@ -337,6 +407,14 @@ def main() -> None:
         stop_event.set()
         audio.stop()
         session_logger.close()
+
+    # Handle Ctrl+C gracefully
+    def _sigint_handler(sig, frame):
+        print("\n  Interrupted — shutting down…")
+        shutdown()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _sigint_handler)
 
     # Start audio capture threads
     audio.start()

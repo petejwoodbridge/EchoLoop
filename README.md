@@ -9,10 +9,10 @@
 
 <p align="center">
   <a href="#-quickstart"><img src="https://img.shields.io/badge/-Get%20Started-00d4aa?style=for-the-badge&logo=rocket&logoColor=white" alt="Get Started" /></a>
+  <a href="https://github.com/petejwoodbridge/EchoLoop/actions/workflows/ci.yml"><img src="https://github.com/petejwoodbridge/EchoLoop/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License" />
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform" />
-  <img src="https://img.shields.io/badge/tests-25%20passing-brightgreen?style=flat-square" alt="Tests" />
 </p>
 
 ---
@@ -166,6 +166,21 @@ python -m echoloop
 ```
 
 EchoLoop will list your audio devices, open the overlay, and start coaching.
+
+**CLI flags:**
+
+```bash
+# List audio devices without starting
+python main.py --list-devices
+
+# Set meeting context from the command line
+python main.py --context "Board review with investors"
+
+# Override provider or transcription backend
+python main.py --provider openai --backend deepgram
+```
+
+> **Tip:** EchoLoop auto-loads a `.env` file from the working directory (no `python-dotenv` needed). Copy `.env.example` to `.env`, fill in your key, and you're set.
 
 ## 🖥️ UI Controls
 
