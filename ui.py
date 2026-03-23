@@ -38,6 +38,7 @@ class EchoLoopUI:
         *,
         pause_event: threading.Event | None = None,
         nudge_event: threading.Event | None = None,
+        stats: dict | None = None,
         on_close: callable = None,
     ) -> None:
         self.cfg = cfg
@@ -45,6 +46,8 @@ class EchoLoopUI:
         self._on_close = on_close
         self._pause_event = pause_event or threading.Event()
         self._nudge_event = nudge_event or threading.Event()
+        # Shared stats dict written by the engine, read by the UI
+        self._stats = stats or {}
         if not self._pause_event.is_set():
             self._pause_event.set()
 
@@ -215,9 +218,18 @@ class EchoLoopUI:
     def _update_stats(self) -> None:
         elapsed = time.monotonic() - self._start_time
         mins = int(elapsed // 60)
-        self._stats_label.configure(
-            text=f"{self._insight_count} insight{'s' if self._insight_count != 1 else ''} · {mins}m"
-        )
+
+        parts = [f"{self._insight_count} insight{'s' if self._insight_count != 1 else ''}", f"{mins}m"]
+
+        # Speaker ratio from shared stats
+        wm = self._stats.get("words_me", 0)
+        wt = self._stats.get("words_them", 0)
+        total = wm + wt
+        if total > 0:
+            pct_me = int(100 * wm / total)
+            parts.append(f"you {pct_me}%")
+
+        self._stats_label.configure(text=" · ".join(parts))
 
     # ── Queue polling ────────────────────────────────────────────────
 

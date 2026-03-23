@@ -108,11 +108,14 @@ class EchoLoopEngine:
         *,
         pause_event: threading.Event | None = None,
         nudge_event: threading.Event | None = None,
+        stats: dict | None = None,
     ) -> None:
         self.cfg = cfg
         self._seg_q = segment_queue
         self._insight_q = insight_queue
         self._llm = _LLMClient(cfg)
+        # Shared stats dict, read by the UI
+        self._stats = stats if stats is not None else {}
         # When clear → paused, when set → running.  Default: running.
         self._pause_event = pause_event or threading.Event()
         if not self._pause_event.is_set():
@@ -127,6 +130,10 @@ class EchoLoopEngine:
         self._unsent_text = False
         self._running = False
 
+        # Speaker stats (word counts)
+        self.words_me: int = 0
+        self.words_them: int = 0
+
     # ── Transcript management (O(1) append / trim) ──────────────────
 
     def _append(self, seg: Segment) -> None:
@@ -136,6 +143,15 @@ class EchoLoopEngine:
         self._transcript_chars += len(line) + 1  # +1 for newline
         self._unsent_text = True
         self._last_segment_time = time.monotonic()
+
+        # Track speaker word counts
+        wc = len(seg.text.split())
+        if seg.speaker is Speaker.ME:
+            self.words_me += wc
+        else:
+            self.words_them += wc
+        self._stats["words_me"] = self.words_me
+        self._stats["words_them"] = self.words_them
 
         # Trim from the front to stay within the rolling window
         while self._transcript_chars > self.cfg.max_transcript_chars and self._transcript:

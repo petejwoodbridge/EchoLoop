@@ -321,10 +321,13 @@ def main() -> None:
 
     logging_insight_q = _LoggingInsightQueue(insight_queue, session_logger)
 
+    # Shared stats dict (engine writes, UI reads)
+    shared_stats: dict = {}
+
     transcriber = Transcriber(cfg.transcriber, chunk_queue, segment_queue)
     engine = EchoLoopEngine(
         cfg.llm, segment_queue, logging_insight_q,
-        pause_event=pause_event, nudge_event=nudge_event,
+        pause_event=pause_event, nudge_event=nudge_event, stats=shared_stats,
     )
 
     stop_event = threading.Event()
@@ -353,7 +356,8 @@ def main() -> None:
     print("  Close the overlay window to stop.\n")
     ui = EchoLoopUI(
         cfg.ui, insight_queue,
-        pause_event=pause_event, nudge_event=nudge_event, on_close=shutdown,
+        pause_event=pause_event, nudge_event=nudge_event,
+        stats=shared_stats, on_close=shutdown,
     )
     ui.run()
 

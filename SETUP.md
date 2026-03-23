@@ -117,6 +117,8 @@ Close the overlay window to stop.
 | `ECHOLOOP_LLM_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `ECHOLOOP_PUSH_INTERVAL` | `35` | Seconds between LLM calls |
 | `ECHOLOOP_SILENCE_TRIGGER` | `4.0` | Silence seconds before early push |
+| `ECHOLOOP_LLM_TEMPERATURE` | `0.4` | LLM temperature (lower = more deterministic) |
+| `ECHOLOOP_SYSTEM_PROMPT` | *(built-in)* | Override the default coaching system prompt |
 | `ECHOLOOP_OPACITY` | `0.88` | Overlay window opacity (0.0–1.0) |
 | `ECHOLOOP_ENERGY_THRESHOLD` | `0.005` | RMS below this is treated as silence |
 | `ECHOLOOP_MEETING_CONTEXT` | *(empty)* | One-line meeting briefing for the LLM |
